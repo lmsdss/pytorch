@@ -149,19 +149,36 @@ model.load_state_dict(torch.load('model.pth'), strict=False)
 # 将在 GPU 保存的模型加载到 CPU
 model.load_state_dict(torch.load('model.pth', map_location='cpu'))
 
+
+#加载内置预训练模型
+"""
+有一个很重要的参数为pretrained，默认为False，表示只导入模型的结构，其中的权重是随机初始化的。
+如果pretrained 为 True，表示导入的是在ImageNet数据集上预训练的模型。
+"""
+import torchvision.models as models
+resnet18 = models.resnet18(pretrained=True)
+alexnet = models.alexnet(pretrained=True)
+vgg16 = models.vgg16(pretrained=True)
+
+
 # 分类模型训练代码
 # Loss and optimizer
 train_loader = ''
 learning_rate = 0.001
 num_epochs = 100
 criterion = nn.CrossEntropyLoss()
+# combines :class:`~torch.nn.LogSoftmax` and :class:`~torch.nn.NLLLoss`
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+# 学习率衰减
+scheduler = lr_scheduler.StepLR(optimizer, 10, 0.1)  # # 每过10个epoch，学习率乘以0.1
+
 
 
 # Train the model
 total_step = len(train_loader)
 for epoch in range(num_epochs):
     for i, (images, labels) in enumerate(train_loader):
+        scheduler.step()# 学习率衰减
         images = images.to(device)
         labels = labels.to(device)
 
@@ -206,6 +223,56 @@ class MyLoss(nn.Module):
         loss = torch.mean((x - y) ** 2)
         return loss
 
+
+
+# 冻结某些层的参数
+net = ConvNet()  # 获取自定义网络结构
+for name, value in net.named_parameters():
+    print('name: {0},\t grad: {1}'.format(name, value.requires_grad))
+"""
+假设前几层
+name: cnn.VGG_16.convolution1_1.weight,	 grad: True
+name: cnn.VGG_16.convolution1_1.bias,	 grad: True
+name: cnn.VGG_16.convolution1_2.weight,	 grad: True
+name: cnn.VGG_16.convolution1_2.bias,	 grad: True
+name: cnn.VGG_16.convolution2_1.weight,	 grad: True
+name: cnn.VGG_16.convolution2_1.bias,	 grad: True
+name: cnn.VGG_16.convolution2_2.weight,	 grad: True
+name: cnn.VGG_16.convolution2_2.bias,	 grad: True
+后面的True表示该层的参数可训练，然后我们定义一个要冻结的层的列表：
+"""
+no_grad = [
+    'cnn.VGG_16.convolution1_1.weight',
+    'cnn.VGG_16.convolution1_1.bias',
+    'cnn.VGG_16.convolution1_2.weight',
+    'cnn.VGG_16.convolution1_2.bias'
+]
+# 冻结方法如下
+for name, value in net.named_parameters():
+    if name in no_grad:
+        value.requires_grad = False
+    else:
+        value.requires_grad = True
+
+# 对不同层使用不同学习率
+# 对上面的convolution1 和 convolution2 设置不同的学习率，首先将它们分开，即放到不同的列表里：
+conv1_params = []
+conv2_params = []
+
+for name, parms in net.named_parameters():
+    if "convolution1" in name:
+        conv1_params += [parms]
+    else:
+        conv2_params += [parms]
+
+# 然后在优化器中进行如下操作：
+optimizer = optim.Adam(
+    [
+        {"params": conv1_params, 'lr': 0.01},
+        {"params": conv2_params, 'lr': 0.001},
+    ],
+    weight_decay=1e-3,
+)
 
 # Mixup训练
 alpha = 2
